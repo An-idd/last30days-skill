@@ -13,6 +13,7 @@ from typing import Any
 from . import (
     bilibili,
     bird_x,
+    douyin,
     bluesky,
     dates,
     dedupe,
@@ -62,6 +63,7 @@ SEARCH_ALIAS = {
     "web": "grounding",
     "xhs": "xiaohongshu",
     "bili": "bilibili",
+    "dy": "douyin",
     "xquik": "xquik",
 }
 
@@ -80,6 +82,7 @@ MOCK_AVAILABLE_SOURCES = [
     "grounding",
     "xiaohongshu",
     "bilibili",
+    "douyin",
     "github",
     "perplexity",
     "threads",
@@ -138,6 +141,9 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
     # Bilibili auto-enables on TikHub key presence (no network probe).
     if env.is_bilibili_available(config):
         available.append("bilibili")
+    # Douyin shares the TikHub key with Bilibili (no separate probe).
+    if env.get_tikhub_token(config):
+        available.append("douyin")
     if env.is_threads_available(config):
         available.append("threads")
     if requested_sources and "pinterest" in requested_sources and env.is_pinterest_available(config):
@@ -1057,6 +1063,18 @@ def _retrieve_stream(
         if items and env.get_tikhub_token(config):
             bilibili.enrich_with_comments(items, token=env.get_tikhub_token(config))
         return items, {}
+    if source == "douyin":
+        # Use raw_topic so the search keyword is the user's original phrasing,
+        # not the planner's narrowed search_query (better Chinese recall).
+        dy_query = raw_topic or subquery.search_query
+        result = douyin.search_and_enrich(
+            dy_query,
+            from_date,
+            to_date,
+            depth=depth,
+            token=env.get_tikhub_token(config),
+        )
+        return douyin.parse_douyin_response(result), {}
     if source == "perplexity":
         return perplexity.search(subquery.search_query, date_range, config, deep=config.get("_deep_research", False))
     if source == "xquik":

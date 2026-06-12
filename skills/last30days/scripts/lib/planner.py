@@ -71,6 +71,7 @@ SOURCE_CAPABILITIES = {
     "digg": {"discussion", "social", "link"},
     "xiaohongshu": {"video", "video_shortform", "social"},
     "bilibili": {"video", "video_longform", "discussion", "social"},
+    "douyin": {"video", "video_shortform", "social"},
     "github": {"discussion", "link"},
     "grounding": {"web", "reference", "link"},
     "perplexity": {"web", "reference", "analysis"},

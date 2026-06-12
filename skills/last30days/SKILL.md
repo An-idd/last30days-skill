@@ -333,7 +333,7 @@ Common patterns:
 - If SCRAPECREATORS_API_KEY is set: add TikTok, Instagram, Threads (suppress any of these via EXCLUDE_SOURCES)
 - If SCRAPECREATORS_API_KEY is set and the user explicitly requested pinterest for this query (e.g. via `--search=pinterest`): add Pinterest
 - If BSKY_HANDLE and BSKY_APP_PASSWORD are set: add Bluesky
-- If TIKHUB_API_KEY is set: add Bilibili (中文长视频源, auto-enabled; suppress via EXCLUDE_SOURCES)
+- If TIKHUB_API_KEY is set: add Bilibili (中文长视频源) and Douyin (抖音/中文短视频源), both auto-enabled; suppress either via EXCLUDE_SOURCES
 - If XIAOHONGSHU_API_BASE is set (points at a running xiaohongshu-mcp service), or the user requested it via `--search=xhs`: add Xiaohongshu (小红书)
 - If OPENROUTER_API_KEY is set and INCLUDE_SOURCES contains perplexity: add Perplexity
 - If EXCLUDE_SOURCES is set (comma-separated, case-insensitive): drop any matching source from the list above before displaying
