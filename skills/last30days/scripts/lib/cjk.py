@@ -46,24 +46,24 @@ CHINESE_STOPWORDS = frozenset(
     }
 )
 
-# Lazy, optional jieba. Import failure (not installed) leaves _jieba = None and
-# the bigram fallback handles CJK segmentation.
-_jieba = None
-_jieba_tried = False
+# Optional jieba, resolved once at import time. Binding it here (rather than
+# lazily on first use) avoids a race: the pipeline scores relevance inside a
+# ThreadPoolExecutor, so a lazy initializer with mutable globals could have two
+# threads import concurrently and observe a half-initialized state. Doing it at
+# module load means the binding is settled before any worker thread runs.
+#
+# The BROAD `except Exception` is intentional: jieba is an optional enhancement,
+# so ANY failure to load it — package absent, corrupted install, missing data
+# files, or a setLogLevel signature change across versions — must degrade to the
+# bigram fallback, never crash the skill. jieba guards its own first-call
+# dictionary build with an internal lock, so concurrent `cut()` is safe once the
+# module object is bound.
+try:
+    import jieba as _jieba  # type: ignore
 
-
-def _get_jieba():
-    global _jieba, _jieba_tried
-    if not _jieba_tried:
-        _jieba_tried = True
-        try:
-            import jieba  # type: ignore
-
-            jieba.setLogLevel(60)  # silence dictionary-build chatter on stderr
-            _jieba = jieba
-        except Exception:
-            _jieba = None
-    return _jieba
+    _jieba.setLogLevel(60)  # silence dictionary-build chatter on stderr
+except Exception:
+    _jieba = None
 
 
 def has_cjk(text: str) -> bool:
@@ -72,9 +72,11 @@ def has_cjk(text: str) -> bool:
 
 
 def _cjk_tokens(run: str) -> List[str]:
-    jieba = _get_jieba()
-    if jieba is not None:
-        return [w for w in jieba.cut(run) if w.strip() and _CJK_RE.search(w)]
+    # Reads the module-global _jieba at call time, so tests can force the bigram
+    # path deterministically by setting cjk._jieba = None regardless of whether
+    # jieba is installed in the environment.
+    if _jieba is not None:
+        return [w for w in _jieba.cut(run) if w.strip() and _CJK_RE.search(w)]
     # Dictionary-free fallback: character bigrams (single char if run length 1).
     if len(run) <= 1:
         return [run] if run else []

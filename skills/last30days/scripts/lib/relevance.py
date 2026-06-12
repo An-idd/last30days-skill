@@ -157,8 +157,18 @@ def token_overlap_relevance(
     phrase_bonus = 0.0
     normalized_query = prepared.normalized_phrase
     normalized_text = _normalize_phrase(combined)
-    if normalized_query and normalized_query in normalized_text:
-        phrase_bonus = 0.12 if len(normalized_query.split()) > 1 else 0.16
+    if normalized_query:
+        contained = normalized_query in normalized_text
+        if not contained and cjk.has_cjk(normalized_query):
+            # CJK has no inter-word spaces, so a multi-token Chinese query like
+            # "国产大模型 测评" never appears verbatim in continuous source text
+            # ("...国产大模型的最新测评"). Retry the containment with spaces
+            # removed so the phrase bonus isn't permanently dead for Chinese.
+            # Gated on has_cjk so English ("react hooks") keeps space-sensitive
+            # matching and doesn't gain spurious bonuses from concatenation.
+            contained = normalized_query.replace(" ", "") in normalized_text.replace(" ", "")
+        if contained:
+            phrase_bonus = 0.12 if len(normalized_query.split()) > 1 else 0.16
 
     base = (
         0.55 * (coverage ** 1.35) +
