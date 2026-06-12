@@ -43,7 +43,7 @@ KEYCHAIN_KEYS = (
     "AUTH_TOKEN", "CT0", "BSKY_HANDLE", "BSKY_APP_PASSWORD",
     "TRUTHSOCIAL_TOKEN", "BRAVE_API_KEY", "EXA_API_KEY", "SERPER_API_KEY",
     "OPENROUTER_API_KEY", "PARALLEL_API_KEY", "XQUIK_API_KEY",
-    "XIAOHONGSHU_API_BASE",
+    "XIAOHONGSHU_API_BASE", "TIKHUB_API_KEY",
 )
 
 AuthSource = Literal["api_key", "codex", "none"]
@@ -309,6 +309,7 @@ def get_config() -> dict[str, Any]:
         ('GEMINI_API_KEY', None),
         ('GOOGLE_GENAI_API_KEY', None),
         ('XIAOHONGSHU_API_BASE', None),
+        ('TIKHUB_API_KEY', None),
         ('LAST30DAYS_REASONING_PROVIDER', 'auto'),
         ('LAST30DAYS_PLANNER_MODEL', None),
         ('LAST30DAYS_RERANK_MODEL', None),
@@ -631,6 +632,20 @@ def is_instagram_available(config: dict[str, Any]) -> bool:
 def get_instagram_token(config: dict[str, Any]) -> str:
     """Get Instagram API token (same ScrapeCreators key as TikTok)."""
     return config.get('SCRAPECREATORS_API_KEY') or ''
+
+
+def get_tikhub_token(config: dict[str, Any]) -> str | None:
+    """Return the TikHub API key (Bilibili / future Douyin backend), if set."""
+    return config.get('TIKHUB_API_KEY') or None
+
+
+def is_bilibili_available(config: dict[str, Any]) -> bool:
+    """Bilibili is available when a TikHub API key is configured.
+
+    Key presence is sufficient — no network probe — mirroring how the
+    ScrapeCreators-backed sources (TikTok, Instagram) gate on key presence.
+    """
+    return bool(get_tikhub_token(config))
 
 
 def get_xiaohongshu_api_base(config: dict[str, Any]) -> str:

@@ -9,6 +9,8 @@ The score is intentionally query-centric:
 import re
 from typing import List, Optional, Set
 
+from . import cjk
+
 # Stopwords for relevance computation (common English words that dilute token overlap)
 STOPWORDS = frozenset({
     'the', 'a', 'an', 'to', 'for', 'how', 'is', 'in', 'of', 'on',
@@ -16,7 +18,7 @@ STOPWORDS = frozenset({
     'your', 'i', 'me', 'we', 'you', 'what', 'are', 'do', 'can',
     'its', 'be', 'or', 'not', 'no', 'so', 'if', 'but', 'about',
     'all', 'just', 'get', 'has', 'have', 'was', 'will',
-})
+}) | cjk.CHINESE_STOPWORDS
 
 # Synonym groups for relevance scoring (bidirectional expansion)
 # Superset of all platform-specific synonym dicts
@@ -56,8 +58,12 @@ def tokenize(text: str) -> Set[str]:
     """Lowercase, strip punctuation, remove stopwords, drop single-char tokens.
 
     Expands tokens with synonyms for better cross-domain matching.
+
+    Chinese text is segmented via cjk.segment (jieba or character bigrams) so
+    overlap scoring works on Chinese sources; ASCII text keeps the original
+    whitespace path.
     """
-    words = re.sub(r'[^\w\s]', ' ', text.lower()).split()
+    words = cjk.segment(text)
     tokens = {w for w in words if w not in STOPWORDS and len(w) > 1}
     expanded = set(tokens)
     for t in tokens:

@@ -11,6 +11,7 @@ from shutil import which
 from typing import Any
 
 from . import (
+    bilibili,
     bird_x,
     bluesky,
     dates,
@@ -60,6 +61,7 @@ SEARCH_ALIAS = {
     "truth": "truthsocial",
     "web": "grounding",
     "xhs": "xiaohongshu",
+    "bili": "bilibili",
     "xquik": "xquik",
 }
 
@@ -77,6 +79,7 @@ MOCK_AVAILABLE_SOURCES = [
     "polymarket",
     "grounding",
     "xiaohongshu",
+    "bilibili",
     "github",
     "perplexity",
     "threads",
@@ -124,8 +127,17 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
         "perplexity" in include_sources or (requested_sources and "perplexity" in requested_sources)
     ):
         available.append("perplexity")
-    if requested_sources and "xiaohongshu" in requested_sources and env.is_xiaohongshu_available(config):
+    # Xiaohongshu auto-enables when XIAOHONGSHU_API_BASE is explicitly configured
+    # (the user opted in by pointing at a running xiaohongshu-mcp service), or
+    # when explicitly requested via --search=xhs. The reachability probe in
+    # is_xiaohongshu_available() does network I/O, so it only runs in those two
+    # cases — unconfigured English runs pay no latency.
+    xhs_requested = bool(requested_sources and "xiaohongshu" in requested_sources)
+    if (config.get("XIAOHONGSHU_API_BASE") or xhs_requested) and env.is_xiaohongshu_available(config):
         available.append("xiaohongshu")
+    # Bilibili auto-enables on TikHub key presence (no network probe).
+    if env.is_bilibili_available(config):
+        available.append("bilibili")
     if env.is_threads_available(config):
         available.append("threads")
     if requested_sources and "pinterest" in requested_sources and env.is_pinterest_available(config):
@@ -1030,6 +1042,21 @@ def _retrieve_stream(
             env.get_xiaohongshu_api_base(config),
             depth=depth,
         ), {}
+    if source == "bilibili":
+        # Use raw_topic so the search keyword is the user's original phrasing,
+        # not the planner's narrowed search_query (better Chinese recall).
+        bili_query = raw_topic or subquery.search_query
+        result = bilibili.search_and_enrich(
+            bili_query,
+            from_date,
+            to_date,
+            depth=depth,
+            token=env.get_tikhub_token(config),
+        )
+        items = bilibili.parse_bilibili_response(result)
+        if items and env.get_tikhub_token(config):
+            bilibili.enrich_with_comments(items, token=env.get_tikhub_token(config))
+        return items, {}
     if source == "perplexity":
         return perplexity.search(subquery.search_query, date_range, config, deep=config.get("_deep_research", False))
     if source == "xquik":

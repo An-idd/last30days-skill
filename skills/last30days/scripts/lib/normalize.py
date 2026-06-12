@@ -40,6 +40,9 @@ def normalize_source_items(
         "reddit": _normalize_reddit,
         "x": _normalize_x,
         "youtube": _normalize_youtube,
+        # Bilibili is long-form video like YouTube; reuse the same normalizer
+        # (title + description + subtitle transcript + top comments).
+        "bilibili": _normalize_youtube,
         "tiktok": lambda s, i, idx, fd, td: _normalize_shortform_video(s, i, idx, fd, td, "TK", "TikTok post"),
         "instagram": lambda s, i, idx, fd, td: _normalize_shortform_video(s, i, idx, fd, td, "IG", "Instagram reel"),
         "hackernews": _normalize_hackernews,

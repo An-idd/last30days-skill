@@ -39,6 +39,7 @@ ALL_KEYS=(
   PARALLEL_API_KEY
   XQUIK_API_KEY
   XIAOHONGSHU_API_BASE
+  TIKHUB_API_KEY
 )
 
 if [[ "${OSTYPE:-}" != darwin* ]]; then

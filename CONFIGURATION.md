@@ -62,6 +62,8 @@ The project-scoped file is the cleanest pattern for **per-client setups**: drop 
 | Pinterest | `SCRAPECREATORS_API_KEY` + `INCLUDE_SOURCES` contains `pinterest` | Pinterest items | 10K free calls |
 | Bluesky | `BSKY_HANDLE` + `BSKY_APP_PASSWORD` | Bluesky items | yes (app password at bsky.app) |
 | TruthSocial | `TRUTHSOCIAL_TOKEN` | TruthSocial items | yes |
+| Bilibili (B站) | `TIKHUB_API_KEY` | Bilibili videos (auto-enabled when key present) | pay-as-you-go (~$0.001/request, ~50 free on signup) |
+| Xiaohongshu (小红书) | `XIAOHONGSHU_API_BASE` pointing at a running [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) service (auto-enabled when set; or `--search=xhs`) | Xiaohongshu notes | self-hosted, free (you run the service + log in) |
 | Web search | one of: `BRAVE_API_KEY`, `EXA_API_KEY`, `SERPER_API_KEY`, `PARALLEL_API_KEY` | `--auto-resolve` and Step 2 supplements | Brave has a free tier; native WebSearch on Claude Code / Codex / Gemini works as a fallback |
 | Perplexity Deep Research | `OPENROUTER_API_KEY` | `--deep-research` flag (~$0.90/query) | no |
 | Apify (alternate scraper) | `APIFY_API_TOKEN` | fallback for Reddit/TikTok/Instagram when ScrapeCreators is exhausted | yes (limited) |
@@ -78,6 +80,10 @@ BRAVE_API_KEY=<your-brave-key>
 # Optional sources
 SCRAPECREATORS_API_KEY=<your-scrapecreators-key>
 INCLUDE_SOURCES=tiktok,instagram
+
+# Chinese sources
+TIKHUB_API_KEY=<your-tikhub-key>          # enables Bilibili (B站)
+XIAOHONGSHU_API_BASE=http://localhost:18060  # points at a running xiaohongshu-mcp service
 
 # X authentication (one option only)
 XAI_API_KEY=<your-xai-key>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from . import schema
+from . import cjk, schema
 
 STOPWORDS = frozenset(
     {
@@ -31,7 +31,7 @@ STOPWORDS = frozenset(
         "do",
         "can",
     }
-)
+) | cjk.CHINESE_STOPWORDS
 
 
 def normalize_text(text: str) -> str:
@@ -61,12 +61,12 @@ def jaccard_similarity(left: set[str], right: set[str]) -> float:
 def token_jaccard(text_a: str, text_b: str) -> float:
     tokens_a = {
         token
-        for token in normalize_text(text_a).split()
+        for token in cjk.segment(normalize_text(text_a))
         if len(token) > 1 and token not in STOPWORDS
     }
     tokens_b = {
         token
-        for token in normalize_text(text_b).split()
+        for token in cjk.segment(normalize_text(text_b))
         if len(token) > 1 and token not in STOPWORDS
     }
     return jaccard_similarity(tokens_a, tokens_b)
@@ -81,7 +81,7 @@ def hybrid_similarity(text_a: str, text_b: str) -> float:
 
 def _tokenize(normalized: str) -> frozenset[str]:
     return frozenset(
-        tok for tok in normalized.split()
+        tok for tok in cjk.segment(normalized)
         if len(tok) > 1 and tok not in STOPWORDS
     )
 

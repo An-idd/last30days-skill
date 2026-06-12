@@ -70,6 +70,7 @@ SOURCE_CAPABILITIES = {
     "polymarket": {"market"},
     "digg": {"discussion", "social", "link"},
     "xiaohongshu": {"video", "video_shortform", "social"},
+    "bilibili": {"video", "video_longform", "discussion", "social"},
     "github": {"discussion", "link"},
     "grounding": {"web", "reference", "link"},
     "perplexity": {"web", "reference", "analysis"},

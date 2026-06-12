@@ -278,6 +278,18 @@ def scrapecreators_headers(token: str) -> Dict[str, str]:
     }
 
 
+def tikhub_headers(token: str) -> Dict[str, str]:
+    """Build TikHub request headers (Bearer auth + JSON Accept).
+
+    Used by the Bilibili (and future Douyin) sources, which proxy through the
+    TikHub multi-platform API. Auth is ``Authorization: Bearer <token>``.
+    """
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+
+
 def get_reddit_json(path: str, timeout: int = DEFAULT_TIMEOUT, retries: int = MAX_RETRIES) -> Dict[str, Any]:
     """Fetch Reddit thread JSON.
 
