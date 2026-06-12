@@ -1,0 +1,71 @@
+{
+  "code": 0,
+  "message": "0",
+  "ttl": 1,
+  "data": {
+    "seid": "0",
+    "page": 1,
+    "pagesize": 20,
+    "numResults": 3,
+    "numPages": 1,
+    "result": [
+      {
+        "type": "video",
+        "id": 100001,
+        "author": "测试UP主A",
+        "mid": 12345,
+        "bvid": "BV1AA1xxxxxx",
+        "aid": 100001,
+        "title": "<em class=\"keyword\">长沙麻将</em>新手入门教程",
+        "description": "<em class=\"keyword\">长沙麻将</em>基础规则讲解，适合新手快速上手。",
+        "pic": "//i0.hdslb.com/bfs/archive/aaa.jpg",
+        "play": 124000,
+        "video_review": 1100,
+        "favorites": 3400,
+        "review": 220,
+        "like": 8200,
+        "duration": "4:05",
+        "pubdate": 1748390400,
+        "senddate": 1748390400
+      },
+      {
+        "type": "video",
+        "id": 100002,
+        "author": "测试UP主B",
+        "mid": 67890,
+        "bvid": "BV1BB2yyyyyy",
+        "aid": 100002,
+        "title": "长沙麻将高手对局解说",
+        "description": "复盘真实牌局，讲解胡牌与防守思路。",
+        "pic": "//i0.hdslb.com/bfs/archive/bbb.jpg",
+        "play": 56000,
+        "video_review": 480,
+        "favorites": 1100,
+        "review": 95,
+        "like": 3200,
+        "duration": "12:30",
+        "pubdate": 1746576000,
+        "senddate": 1746576000
+      },
+      {
+        "type": "video",
+        "id": 100003,
+        "author": "测试UP主C",
+        "mid": 24680,
+        "bvid": "BV1CC3zzzzzz",
+        "aid": 100003,
+        "title": "麻将历史档案 2020 年",
+        "description": "怀旧向，发布于早期。",
+        "pic": "//i0.hdslb.com/bfs/archive/ccc.jpg",
+        "play": 9000,
+        "video_review": 50,
+        "favorites": 110,
+        "review": 8,
+        "like": 220,
+        "duration": "8:15",
+        "pubdate": 1577836800,
+        "senddate": 1577836800
+      }
+    ]
+  }
+}

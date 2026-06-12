@@ -640,12 +640,15 @@ def get_tikhub_token(config: dict[str, Any]) -> str | None:
 
 
 def is_bilibili_available(config: dict[str, Any]) -> bool:
-    """Bilibili is available when a TikHub API key is configured.
+    """Bilibili is always available unless explicitly disabled.
 
-    Key presence is sufficient — no network probe — mirroring how the
-    ScrapeCreators-backed sources (TikTok, Instagram) gate on key presence.
+    The adapter (PR #514 approach) auto-bootstraps a buvid3 cookie and uses
+    public WBI-signed search — no API key, no login. Honors
+    LAST30DAYS_DISABLE_BILIBILI=1 as a kill switch.
     """
-    return bool(get_tikhub_token(config))
+    if os.environ.get("LAST30DAYS_DISABLE_BILIBILI") == "1":
+        return False
+    return True
 
 
 def get_xiaohongshu_api_base(config: dict[str, Any]) -> str:

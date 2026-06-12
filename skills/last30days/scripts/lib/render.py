@@ -1236,7 +1236,7 @@ _FOOTER_SOURCES: list[tuple[str, str, str, str, list[tuple[str, str]]]] = [
     ("reddit",      "🟠", "Reddit",       "thread",   [("score", "upvotes"), ("num_comments", "comments")]),
     ("x",           "🔵", "X",            "post",     [("likes", "likes"), ("reposts", "reposts")]),
     ("youtube",     "🔴", "YouTube",      "video",    [("views", "views")]),  # transcripts appended below in _build_source_footer_lines
-    ("bilibili",    "📺", "Bilibili",     "video",    [("views", "views"), ("danmaku", "danmaku")]),
+    ("bilibili",    "📺", "Bilibili",     "video",    [("play", "plays"), ("danmaku", "danmaku")]),
     ("douyin",      "🎶", "Douyin",       "video",    [("likes", "likes"), ("comments", "comments")]),
     ("xiaohongshu", "📕", "Xiaohongshu",  "post",     [("likes", "likes"), ("favorites", "favorites")]),
     ("tiktok",      "🎵", "TikTok",       "video",    [("views", "views"), ("likes", "likes")]),

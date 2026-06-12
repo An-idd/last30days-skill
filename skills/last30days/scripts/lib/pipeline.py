@@ -1049,20 +1049,15 @@ def _retrieve_stream(
             depth=depth,
         ), {}
     if source == "bilibili":
-        # Use raw_topic so the search keyword is the user's original phrasing,
-        # not the planner's narrowed search_query (better Chinese recall).
+        # PR #514 keyless adapter: public WBI-signed search, no token. Use
+        # raw_topic for better Chinese recall than the planner's narrowed query.
         bili_query = raw_topic or subquery.search_query
-        result = bilibili.search_and_enrich(
+        return bilibili.search_bilibili(
             bili_query,
             from_date,
             to_date,
             depth=depth,
-            token=env.get_tikhub_token(config),
-        )
-        items = bilibili.parse_bilibili_response(result)
-        if items and env.get_tikhub_token(config):
-            bilibili.enrich_with_comments(items, token=env.get_tikhub_token(config))
-        return items, {}
+        ), {}
     if source == "douyin":
         # Use raw_topic so the search keyword is the user's original phrasing,
         # not the planner's narrowed search_query (better Chinese recall).
