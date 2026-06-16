@@ -138,11 +138,15 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
     xhs_requested = bool(requested_sources and "xiaohongshu" in requested_sources)
     if (config.get("XIAOHONGSHU_API_BASE") or xhs_requested) and env.is_xiaohongshu_available(config):
         available.append("xiaohongshu")
-    # Bilibili auto-enables on TikHub key presence (no network probe).
+    # Bilibili is keyless (public WBI search); on unless disabled.
     if env.is_bilibili_available(config):
         available.append("bilibili")
-    # Douyin shares the TikHub key with Bilibili (no separate probe).
-    if env.get_tikhub_token(config):
+    # Douyin: opt-in China-specific source (Apify actor). Enable via
+    # --search=douyin or INCLUDE_SOURCES=douyin so it never auto-runs just
+    # because an APIFY_API_TOKEN happens to be set for another purpose.
+    if env.is_douyin_available(config) and (
+        (requested_sources and "douyin" in requested_sources) or "douyin" in include_sources
+    ):
         available.append("douyin")
     if env.is_threads_available(config):
         available.append("threads")
@@ -1059,17 +1063,23 @@ def _retrieve_stream(
             depth=depth,
         ), {}
     if source == "douyin":
-        # Use raw_topic so the search keyword is the user's original phrasing,
-        # not the planner's narrowed search_query (better Chinese recall).
-        dy_query = raw_topic or subquery.search_query
+        # Use raw_topic so expand_douyin_queries() generates diverse variants
+        # from the original user topic, not the planner's narrowed search_query.
+        douyin_query = raw_topic or subquery.search_query
+        douyin_token = env.get_douyin_token(config)
         result = douyin.search_and_enrich(
-            dy_query,
+            douyin_query,
             from_date,
             to_date,
             depth=depth,
-            token=env.get_tikhub_token(config),
+            token=douyin_token,
         )
-        return douyin.parse_douyin_response(result), {}
+        items = douyin.parse_douyin_response(result)
+        # Enrich top videos with high-likes comments (key signal for research).
+        # Default-on; suppress via EXCLUDE_SOURCES=douyin_comments.
+        if items and env.is_douyin_comments_available(config):
+            douyin.enrich_with_comments(items, token=douyin_token)
+        return items, {}
     if source == "perplexity":
         return perplexity.search(subquery.search_query, date_range, config, deep=config.get("_deep_research", False))
     if source == "xquik":

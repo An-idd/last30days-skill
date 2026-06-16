@@ -1,36 +1,40 @@
-"""Douyin (抖音) search and enrichment via the TikHub API for /last30days.
+"""Douyin (抖音, Chinese TikTok) search via the Apify MCP actor for /last30days.
 
-Douyin is the mainland-China origin of TikTok and shares the same `aweme`
-data model (aweme_id, desc, statistics.digg_count/comment_count, author,
-text_extra hashtags), so this adapter mirrors tiktok.py field-for-field and
-items normalize through the shared short-form-video normalizer.
+Uses the ``zen-studio/douyin-search-scraper`` Apify actor to search Douyin by
+keyword, extract engagement metrics (views, likes, comments, shares), and pull
+video captions. Chinese, English, hashtags, and brand names all work as queries.
 
-Backend: TikHub (https://api.tikhub.io), Bearer auth — one TIKHUB_API_KEY also
-covers the Bilibili source.
-  - search:   POST /api/v1/douyin/search/fetch_video_search_v2  {keyword, ...}
-  - comments: GET  /api/v1/douyin/web/fetch_video_comments      ?aweme_id=...
-
-Pay-as-you-go (~$0.001/request). Douyin web rarely exposes spoken-word
-transcripts, so content signal comes from the caption (desc) + top comments.
+Requires APIFY_API_TOKEN in config. Apify actor (run via the standard REST
+``run-sync-get-dataset-items`` endpoint, which is also what the MCP server at
+https://mcp.apify.com/?tools=actors,docs,zen-studio/douyin-search-scraper
+invokes under the hood):
+    https://apify.com/zen-studio/douyin-search-scraper
 """
-
-from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
 from . import dates, http, log
 from .relevance import token_overlap_relevance as _compute_relevance
 
-TIKHUB_BASE = "https://api.tikhub.io"
-SEARCH_URL = f"{TIKHUB_BASE}/api/v1/douyin/search/fetch_video_search_v2"
-COMMENTS_URL = f"{TIKHUB_BASE}/api/v1/douyin/web/fetch_video_comments"
+# Actor ids with the slash encoded as `~` for the REST path.
+DOUYIN_ACTOR = "zen-studio~douyin-search-scraper"
+COMMENTS_ACTOR = "zen-studio~douyin-comments-scraper"
+APIFY_BASE = "https://api.apify.com/v2"
 
+# Comment-enrichment defaults: how many top videos to fetch comments for and
+# how many comments to keep per video. Billed at ~$5.99 / 1,000 comments, so
+# kept conservative (3 x 10 = ~30 comments ≈ $0.18 per run).
+COMMENT_MAX_POSTS = 3
+COMMENT_MAX_PER_POST = 10
+
+# Depth configurations: how many results to fetch / captions to keep.
 DEPTH_CONFIG = {
-    "quick":   {"results": 10, "pages": 1},
-    "default": {"results": 20, "pages": 1},
-    "deep":    {"results": 30, "pages": 2},
+    "quick":   {"max_results": 15, "max_captions": 3},
+    "default": {"max_results": 30, "max_captions": 5},
+    "deep":    {"max_results": 60, "max_captions": 8},
 }
 
+# Max words to keep from each caption.
 CAPTION_MAX_WORDS = 500
 
 
@@ -38,104 +42,159 @@ def _log(msg: str):
     log.source_log("Douyin", msg)
 
 
-def _to_int(value: Any) -> int:
-    """Coerce a count to int. Handles ints, numeric strings, and 万/亿 suffixes."""
-    if value is None:
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return 0
-    try:
-        if text.endswith("万"):
-            return int(float(text[:-1]) * 10000)
-        if text.endswith("亿"):
-            return int(float(text[:-1]) * 100000000)
-        return int(float(text))
-    except (TypeError, ValueError):
-        return 0
+def _extract_core_subject(topic: str) -> str:
+    """Extract core subject from a verbose query for Douyin search."""
+    from .query import extract_core_subject
+    _DOUYIN_NOISE = frozenset({
+        'best', 'top', 'latest', 'new', 'news', 'update', 'updates',
+        'trending', 'hottest', 'popular', 'viral',
+        'recommendations', 'advice', 'review', 'reviews',
+        'methods', 'strategies', 'approaches',
+    })
+    return extract_core_subject(topic, noise=_DOUYIN_NOISE)
 
 
-def _unwrap_awemes(resp: Any) -> List[Dict[str, Any]]:
-    """Locate the list of aweme dicts in a TikHub Douyin search response.
+def expand_douyin_queries(topic: str, depth: str) -> List[str]:
+    """Generate Douyin keyword queries from a topic.
 
-    TikHub wraps the raw Douyin payload as {code, data: {...}}. The aweme list
-    has appeared under data.data, data.aweme_list, and data.business_data in
-    the wild; each entry is either the aweme itself or {aweme_info: aweme}.
+    Douyin's audience is largely Chinese, but the actor accepts Chinese,
+    English, hashtags, and brand names. We keep this lightweight: the core
+    subject plus the cleaned original topic when distinct. The actor itself
+    handles relevance ranking, so over-expanding only wastes credits.
+
+    Returns 1-2 query strings depending on depth.
     """
-    if not isinstance(resp, dict):
-        return []
-    data = resp.get("data", resp)
-    candidates: List[Any] = []
-    if isinstance(data, dict):
-        for key in ("data", "aweme_list", "business_data", "list"):
-            maybe = data.get(key)
-            if isinstance(maybe, list) and maybe:
-                candidates = maybe
-                break
-    elif isinstance(data, list):
-        candidates = data
+    core = _extract_core_subject(topic)
+    queries = [core]
 
-    awemes: List[Dict[str, Any]] = []
-    for entry in candidates:
-        if not isinstance(entry, dict):
-            continue
-        info = entry.get("aweme_info") if isinstance(entry.get("aweme_info"), dict) else entry
-        if isinstance(info, dict) and (info.get("aweme_id") or info.get("desc")):
-            awemes.append(info)
-    return awemes
+    original_clean = topic.strip().rstrip('?!.')
+    if core.lower() != original_clean.lower() and len(original_clean.split()) <= 8:
+        queries.append(original_clean)
+
+    caps = {"quick": 1, "default": 2, "deep": 2}
+    cap = caps.get(depth, 2)
+    return queries[:cap]
 
 
-def _parse_items(awemes: List[Dict[str, Any]], core_topic: str) -> List[Dict[str, Any]]:
+def _publish_time(from_date: str, to_date: str) -> str:
+    """Map the requested date window onto the actor's publishTime buckets.
+
+    The actor only supports unlimited / one_day / one_week / half_year, so we
+    pick the smallest bucket that still covers the window and rely on a hard
+    date filter afterward to trim anything outside [from_date, to_date].
+    """
+    start = dates.parse_date(from_date)
+    end = dates.parse_date(to_date)
+    if not start or not end:
+        return "half_year"
+    span = (end - start).days
+    if span <= 1:
+        return "one_day"
+    if span <= 7:
+        return "one_week"
+    if span <= 183:
+        return "half_year"
+    return "unlimited"
+
+
+def _parse_date(item: Dict[str, Any]) -> Optional[str]:
+    """Parse a Douyin item's publish date to YYYY-MM-DD."""
+    ts = item.get("createTime")
+    if ts:
+        try:
+            return dates.timestamp_to_date(int(ts))
+        except (ValueError, TypeError):
+            pass
+    create_date = item.get("createDate")
+    if isinstance(create_date, str) and len(create_date) >= 10:
+        return create_date[:10]
+    return None
+
+
+def _author_handle(item: Dict[str, Any]) -> str:
+    """Extract the creator label from authorMeta.
+
+    Unlike TikTok (where ``unique_id`` is the vanity @handle), Douyin's
+    ``username`` is a numeric 抖音号; the human-readable nickname lives in
+    ``name``. Prefer the nickname for display, falling back to the id.
+    """
+    author = item.get("authorMeta")
+    if isinstance(author, dict):
+        return str(author.get("name") or author.get("username") or "")
+    if isinstance(author, str):
+        return author
+    return ""
+
+
+def _engagement_rank(item: Dict[str, Any]) -> int:
+    """Ranking signal for Douyin items.
+
+    Douyin search results almost always report ``playCount: 0`` (public view
+    counts are hidden), so sorting by views is useless. Rank by likes +
+    comments + collects + shares instead.
+    """
+    eng = item.get("engagement", {})
+    return (
+        (eng.get("likes") or 0)
+        + (eng.get("comments") or 0)
+        + (eng.get("collects") or 0)
+        + (eng.get("shares") or 0)
+    )
+
+
+def _hashtag_names(item: Dict[str, Any]) -> List[str]:
+    """Extract hashtag names whether the actor returns strings or dicts."""
+    out: List[str] = []
+    for tag in item.get("hashtags") or []:
+        if isinstance(tag, str) and tag:
+            out.append(tag.lstrip("#"))
+        elif isinstance(tag, dict):
+            name = tag.get("name") or tag.get("hashtagName") or tag.get("title")
+            if name:
+                out.append(str(name).lstrip("#"))
+    return out
+
+
+def _parse_items(raw_items: List[Dict[str, Any]], core_topic: str) -> List[Dict[str, Any]]:
+    """Parse raw Apify Douyin dataset items into normalized dicts."""
     items: List[Dict[str, Any]] = []
-    for raw in awemes:
-        aweme_id = str(raw.get("aweme_id") or "").strip()
-        if not aweme_id:
+    for raw in raw_items:
+        if not isinstance(raw, dict):
             continue
-        text = str(raw.get("desc") or "").strip()
+        video_id = str(raw.get("id") or "")
+        text = str(raw.get("text") or raw.get("caption") or "")
 
         stats = raw.get("statistics") if isinstance(raw.get("statistics"), dict) else {}
-        play = _to_int(stats.get("play_count"))
-        likes = _to_int(stats.get("digg_count"))
-        comments = _to_int(stats.get("comment_count"))
-        shares = _to_int(stats.get("share_count"))
+        play_count = stats.get("playCount") or stats.get("play_count") or 0
+        digg_count = stats.get("diggCount") or stats.get("digg_count") or 0
+        comment_count = stats.get("commentCount") or stats.get("comment_count") or 0
+        share_count = stats.get("shareCount") or stats.get("share_count") or 0
+        collect_count = stats.get("collectCount") or stats.get("collect_count") or 0
 
-        author_raw = raw.get("author")
-        if isinstance(author_raw, dict):
-            author_name = author_raw.get("unique_id") or author_raw.get("nickname") or ""
-        elif isinstance(author_raw, str):
-            author_name = author_raw
-        else:
-            author_name = ""
+        hashtag_names = _hashtag_names(raw)
+        author_name = _author_handle(raw)
+        url = str(raw.get("url") or raw.get("shareUrl") or "").split("?")[0]
+        date_str = _parse_date(raw)
 
-        text_extra = raw.get("text_extra") or []
-        hashtags = [t.get("hashtag_name", "") for t in text_extra
-                    if isinstance(t, dict) and t.get("hashtag_name")]
-
-        date_str = dates.timestamp_to_date(raw.get("create_time"))
-
-        share_url = str(raw.get("share_url") or "").split("?")[0]
-        url = share_url or (f"https://www.douyin.com/video/{aweme_id}" if aweme_id else "")
-
-        relevance = _compute_relevance(core_topic, text, hashtags)
+        relevance = _compute_relevance(core_topic, text, hashtag_names)
 
         items.append({
-            "video_id": aweme_id,
+            "id": video_id,
             "text": text,
             "url": url,
             "author_name": author_name,
             "date": date_str,
             "engagement": {
-                "views": play,
-                "likes": likes,
-                "comments": comments,
-                "shares": shares,
+                "views": play_count,
+                "likes": digg_count,
+                "comments": comment_count,
+                "shares": share_count,
+                "collects": collect_count,
             },
-            "hashtags": hashtags,
+            "hashtags": hashtag_names,
             "relevance": relevance,
             "why_relevant": f"Douyin: {text[:60]}" if text else f"Douyin: {core_topic}",
-            "caption_snippet": text[:CAPTION_MAX_WORDS],
+            "caption_snippet": "",  # populated below from caption/text
         })
     return items
 
@@ -147,143 +206,71 @@ def search_douyin(
     depth: str = "default",
     token: str = None,
 ) -> Dict[str, Any]:
-    """Search Douyin videos via TikHub video search v2."""
+    """Search Douyin via the Apify ``zen-studio/douyin-search-scraper`` actor.
+
+    Args:
+        topic: Search topic (keyword).
+        from_date: Start date (YYYY-MM-DD).
+        to_date: End date (YYYY-MM-DD).
+        depth: 'quick', 'default', or 'deep'.
+        token: Apify API token.
+
+    Returns:
+        Dict with 'items' list and optional 'error'.
+    """
     if not token:
-        return {"items": [], "error": "No TIKHUB_API_KEY configured"}
+        return {"items": [], "error": "No APIFY_API_TOKEN configured"}
 
     config = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])
-    _log(f"Searching Douyin for '{topic}' (depth={depth})")
+    core_topic = _extract_core_subject(topic)
 
-    awemes: List[Dict[str, Any]] = []
-    cursor = 0
-    last_error = None
-    for _ in range(config["pages"]):
-        try:
-            resp = http.post(
-                SEARCH_URL,
-                json_data={
-                    "keyword": topic,
-                    "cursor": cursor,
-                    "sort_type": "0",       # 0 = comprehensive (recency-weighted)
-                    "publish_time": "0",    # 0 = no server filter; we date-filter below
-                },
-                headers=http.tikhub_headers(token),
-                timeout=30,
-                retries=2,
-            )
-        except Exception as e:
-            last_error = f"{type(e).__name__}: {e}"
-            _log(f"TikHub search error: {e}")
-            break
-        page = _unwrap_awemes(resp)
-        if not page:
-            break
-        awemes.extend(page)
-        cursor += len(page)
-        if len(awemes) >= config["results"] * config["pages"]:
-            break
+    _log(f"Searching Douyin for '{core_topic}' (depth={depth}, count={config['max_results']})")
 
-    items = _parse_items(awemes[:config["results"] * config["pages"]], topic)
+    payload = {
+        "keywords": [core_topic],
+        "maxResultsPerQuery": config["max_results"],
+        "sort": "general",
+        "publishTime": _publish_time(from_date, to_date),
+    }
 
-    # Hard date filter, keep-all fallback when nothing lands in the window.
-    in_range = [i for i in items if i["date"] and from_date <= i["date"] <= to_date]
-    if in_range:
-        items = in_range
-    elif items:
-        _log(f"No videos within date range, keeping all {len(items)}")
-
-    items.sort(key=lambda x: x["engagement"]["likes"], reverse=True)
-    _log(f"Found {len(items)} Douyin videos")
-    return {"items": items, "error": last_error if not items else None}
-
-
-def _total_engagement(item: Dict[str, Any]) -> int:
-    eng = item.get("engagement", {})
-    return (eng.get("likes", 0) or 0) + (eng.get("comments", 0) or 0) + (eng.get("views", 0) or 0)
-
-
-def enrich_with_comments(
-    items: List[Dict[str, Any]],
-    token: str,
-    max_posts: int = 3,
-    max_comments: int = 5,
-) -> List[Dict[str, Any]]:
-    """Attach top comments to the highest-engagement videos (mirrors tiktok)."""
-    if not items or not token or max_posts <= 0:
-        return items
-    ranked = sorted(items, key=_total_engagement, reverse=True)[:max_posts]
-    _log(f"Enriching comments for {len(ranked)} Douyin videos")
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def _enrich_one(item: dict) -> bool:
-        aweme_id = item.get("video_id")
-        if not aweme_id:
-            return False
-        try:
-            comments = _fetch_comments(aweme_id, token, max_comments)
-            if comments:
-                item["top_comments"] = comments
-                return True
-        except Exception as exc:
-            _log(f"Comment enrichment failed for {aweme_id}: {exc}")
-        return False
-
-    enriched = 0
-    with ThreadPoolExecutor(max_workers=min(4, len(ranked))) as executor:
-        futures = {executor.submit(_enrich_one, item): item for item in ranked}
-        for future in as_completed(futures):
-            if future.result():
-                enriched += 1
-    _log(f"Enriched {enriched}/{len(ranked)} videos with comments")
-    return items
-
-
-def _fetch_comments(aweme_id: str, token: str, max_comments: int) -> List[Dict[str, Any]]:
-    """Fetch top comments for one video. Returns [] on any error."""
     try:
-        data = http.get(
-            COMMENTS_URL,
-            params={"aweme_id": aweme_id, "cursor": 0, "count": max(20, max_comments)},
-            headers=http.tikhub_headers(token),
-            timeout=30,
+        # run-sync-get-dataset-items blocks until the run finishes and returns
+        # the dataset items array directly (the actor scrape can take a while,
+        # so the timeout is generous and retries are kept low).
+        data = http.post(
+            f"{APIFY_BASE}/acts/{DOUYIN_ACTOR}/run-sync-get-dataset-items",
+            json_data=payload,
+            params={"token": token},
+            timeout=180,
             retries=2,
         )
-    except Exception as exc:
-        _log(f"Comment fetch error for {aweme_id}: {exc}")
-        return []
+    except Exception as e:
+        _log(f"Apify error: {e}")
+        return {"items": [], "error": f"{type(e).__name__}: {e}"}
 
-    payload = data.get("data") if isinstance(data, dict) else None
-    raw_comments = []
-    if isinstance(payload, dict):
-        raw_comments = payload.get("comments") or payload.get("data") or []
-    elif isinstance(data, dict):
-        raw_comments = data.get("comments") or []
-    if not isinstance(raw_comments, list):
-        return []
+    # run-sync-get-dataset-items returns a bare JSON array of dataset items.
+    if isinstance(data, list):
+        raw_items = data
+    else:
+        raw_items = data.get("items") or data.get("data") or []
+    raw_items = raw_items[:config["max_results"]]
 
-    raw_comments = sorted(
-        raw_comments,
-        key=lambda c: _to_int(c.get("digg_count")) if isinstance(c, dict) else 0,
-        reverse=True,
-    )
-    out: List[Dict[str, Any]] = []
-    for c in raw_comments[:max_comments]:
-        if not isinstance(c, dict):
-            continue
-        text = str(c.get("text") or "").strip()
-        if not text:
-            continue
-        user = c.get("user") if isinstance(c.get("user"), dict) else {}
-        author = user.get("nickname") or user.get("unique_id") or ""
-        date_str = dates.timestamp_to_date(c.get("create_time")) or ""
-        out.append({
-            "author": str(author),
-            "text": text[:400],
-            "digg_count": _to_int(c.get("digg_count")),
-            "date": date_str,
-        })
-    return out
+    items = _parse_items(raw_items, core_topic)
+
+    # Hard date filter (the publishTime bucket is coarser than the real window).
+    in_range = [i for i in items if i["date"] and from_date <= i["date"] <= to_date]
+    out_of_range = len(items) - len(in_range)
+    if in_range:
+        items = in_range
+        if out_of_range:
+            _log(f"Filtered {out_of_range} videos outside date range")
+    else:
+        _log(f"No videos within date range, keeping all {len(items)}")
+
+    items.sort(key=_engagement_rank, reverse=True)
+
+    _log(f"Found {len(items)} Douyin videos")
+    return {"items": items}
 
 
 def search_and_enrich(
@@ -293,15 +280,171 @@ def search_and_enrich(
     depth: str = "default",
     token: str = None,
 ) -> Dict[str, Any]:
-    """Full Douyin flow: search, then attach top comments to top videos."""
-    result = search_douyin(topic, from_date, to_date, depth, token)
-    items = result.get("items", [])
+    """Full Douyin search: run expanded keyword queries and merge results.
+
+    Mirrors tiktok.search_and_enrich() but the Apify actor already returns the
+    video caption inline, so there is no separate transcript-fetch pass.
+
+    Args:
+        topic: Search topic (raw topic, not the planner's narrowed query).
+        from_date: Start date (YYYY-MM-DD).
+        to_date: End date (YYYY-MM-DD).
+        depth: 'quick', 'default', or 'deep'.
+        token: Apify API token.
+
+    Returns:
+        Dict with 'items' list. Each item has a 'caption_snippet' field.
+    """
+    seen_ids: Set[str] = set()
+    items: List[Dict[str, Any]] = []
+    last_error = None
+
+    for q in expand_douyin_queries(topic, depth):
+        result = search_douyin(q, from_date, to_date, depth, token)
+        if result.get("error"):
+            last_error = result["error"]
+        for item in result.get("items", []):
+            vid = item.get("id", "")
+            if vid and vid not in seen_ids:
+                seen_ids.add(vid)
+                items.append(item)
+
+    items.sort(key=_engagement_rank, reverse=True)
+
     if not items:
-        return {"items": [], "error": result.get("error")}
-    enrich_with_comments(items, token)
-    return {"items": items, "error": result.get("error")}
+        return {"items": [], "error": last_error}
+
+    # The caption is already inline in the search payload — use the description
+    # text as the caption snippet (truncated), matching TikTok's snippet shape.
+    for item in items:
+        text = item.get("text", "")
+        if text:
+            words = text.split()
+            if len(words) > CAPTION_MAX_WORDS:
+                text = ' '.join(words[:CAPTION_MAX_WORDS]) + '...'
+            item["caption_snippet"] = text
+
+    return {"items": items, "error": last_error}
 
 
 def parse_douyin_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Return the normalized item list from a search_and_enrich result."""
+    """Parse a Douyin search response into the list ready for normalization."""
     return response.get("items", [])
+
+
+def _fetch_comments(
+    aweme_urls: List[str],
+    token: str,
+    max_comments: int,
+) -> List[Dict[str, Any]]:
+    """Fetch comments for multiple Douyin videos in one Apify run.
+
+    The zen-studio/douyin-comments-scraper actor accepts an array of video
+    URLs (``awemeUrls``), so all top videos are fetched in a single run rather
+    than one run per video. Each output row carries ``awemeId`` so callers can
+    group comments back to their parent video.
+
+    Returns the raw comment rows, or an empty list on any error — comment
+    failures must never crash the pipeline.
+    """
+    payload = {
+        "awemeUrls": aweme_urls,
+        "maxCommentsPerAweme": max_comments,
+        "includeReplies": False,  # top-level high-likes comments only
+    }
+    try:
+        data = http.post(
+            f"{APIFY_BASE}/acts/{COMMENTS_ACTOR}/run-sync-get-dataset-items",
+            json_data=payload,
+            params={"token": token},
+            timeout=180,
+            retries=1,
+        )
+    except Exception as exc:
+        _log(f"Comment fetch error: {exc}")
+        return []
+    if isinstance(data, list):
+        return data
+    return data.get("items") or data.get("data") or []
+
+
+def _comment_engagement(item: Dict[str, Any]) -> int:
+    """Total engagement for ranking which videos deserve comment enrichment."""
+    eng = item.get("engagement", {})
+    return (
+        (eng.get("likes") or 0)
+        + (eng.get("comments") or 0)
+        + (eng.get("collects") or 0)
+    )
+
+
+def enrich_with_comments(
+    items: List[Dict[str, Any]],
+    token: str,
+    max_posts: int = COMMENT_MAX_POSTS,
+    max_comments: int = COMMENT_MAX_PER_POST,
+) -> List[Dict[str, Any]]:
+    """Attach top high-likes comments to the most-engaged Douyin videos.
+
+    Mirrors tiktok.enrich_with_comments: ranks videos by engagement, fetches
+    comments for the top N in a single Apify run, and attaches a ``top_comments``
+    list (shape: author / text / digg_count / date) to each enriched item — the
+    same shape TikTok produces, so normalize._remap_comments handles it as-is.
+
+    Args:
+        items: Douyin items from search_and_enrich().
+        token: Apify API token.
+        max_posts: How many top videos to enrich with comments.
+        max_comments: Max comments to keep per video.
+
+    Returns:
+        Items list (mutated in place) with top_comments added to enriched items.
+    """
+    if not items or not token or max_posts <= 0:
+        return items
+
+    ranked = sorted(items, key=_comment_engagement, reverse=True)
+    top_items = [i for i in ranked[:max_posts] if i.get("url")]
+    if not top_items:
+        return items
+
+    _log(f"Enriching comments for {len(top_items)} Douyin videos")
+    rows = _fetch_comments([i["url"] for i in top_items], token, max_comments)
+    if not rows:
+        return items
+
+    # Group comment rows back to their parent video by awemeId.
+    by_aweme: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        by_aweme.setdefault(str(row.get("awemeId") or ""), []).append(row)
+
+    enriched = 0
+    for item in top_items:
+        comments = by_aweme.get(str(item.get("id") or ""), [])
+        comments.sort(key=lambda c: c.get("likeCount", 0) or 0, reverse=True)
+        mapped: List[Dict[str, Any]] = []
+        for c in comments[:max_comments]:
+            text = c.get("text") or ""
+            if not text:
+                continue
+            user = c.get("user") if isinstance(c.get("user"), dict) else {}
+            date_str = c.get("createDate") or ""
+            if not date_str and c.get("createTime"):
+                try:
+                    date_str = dates.timestamp_to_date(int(c["createTime"])) or ""
+                except (ValueError, TypeError):
+                    date_str = ""
+            mapped.append({
+                "author": str(user.get("nickname") or ""),
+                "text": text[:400],
+                "digg_count": c.get("likeCount", 0) or 0,
+                "date": date_str,
+            })
+        if mapped:
+            item["top_comments"] = mapped
+            enriched += 1
+
+    _log(f"Enriched {enriched}/{len(top_items)} videos with comments")
+    return items
