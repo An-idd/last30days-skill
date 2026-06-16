@@ -42,6 +42,7 @@ def normalize_source_items(
         "youtube": _normalize_youtube,
         "tiktok": lambda s, i, idx, fd, td: _normalize_shortform_video(s, i, idx, fd, td, "TK", "TikTok post"),
         "instagram": lambda s, i, idx, fd, td: _normalize_shortform_video(s, i, idx, fd, td, "IG", "Instagram reel"),
+        "douyin": lambda s, i, idx, fd, td: _normalize_shortform_video(s, i, idx, fd, td, "DY", "Douyin video"),
         "hackernews": _normalize_hackernews,
         "bluesky": lambda s, i, idx, fd, td: _normalize_microblog(s, i, idx, fd, td, "BS", "Bluesky post"),
         "truthsocial": lambda s, i, idx, fd, td: _normalize_microblog(s, i, idx, fd, td, "TS", "Truth Social post"),

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Douyin (抖音 / Chinese TikTok) source**, opt-in via `--search=douyin` (alias `dy`) or `INCLUDE_SOURCES=douyin`. Runs through the [`zen-studio/douyin-search-scraper`](https://apify.com/zen-studio/douyin-search-scraper) Apify actor (also exposed via the Apify MCP server) and requires `APIFY_API_TOKEN`. Returns Douyin videos with views/likes/comments/shares, captions, and hashtags, normalized through the shared short-form-video path alongside TikTok and Instagram. Gated behind explicit opt-in so it never auto-runs just because an `APIFY_API_TOKEN` is present for another purpose. Best for China-market / Chinese-language topics.
+
 ## [3.3.2] - 2026-06-06
 
 ### Fixed

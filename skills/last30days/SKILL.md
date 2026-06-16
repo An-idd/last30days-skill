@@ -42,6 +42,7 @@ metadata:
       - twitter
       - youtube
       - tiktok
+      - douyin
       - instagram
       - hackernews
       - polymarket
@@ -332,6 +333,7 @@ Common patterns:
 - If yt-dlp is installed (check `which yt-dlp`): add YouTube
 - If SCRAPECREATORS_API_KEY is set: add TikTok, Instagram, Threads (suppress any of these via EXCLUDE_SOURCES)
 - If SCRAPECREATORS_API_KEY is set and the user explicitly requested pinterest for this query (e.g. via `--search=pinterest`): add Pinterest
+- If APIFY_API_TOKEN is set and the user explicitly requested douyin for this query (e.g. via `--search=douyin`, or INCLUDE_SOURCES contains douyin): add Douyin (抖音 / Chinese TikTok, via the zen-studio/douyin-search-scraper Apify actor). Opt-in only — useful for China-market or Chinese-language topics.
 - If BSKY_HANDLE and BSKY_APP_PASSWORD are set: add Bluesky
 - If OPENROUTER_API_KEY is set and INCLUDE_SOURCES contains perplexity: add Perplexity
 - If EXCLUDE_SOURCES is set (comma-separated, case-insensitive): drop any matching source from the list above before displaying
@@ -866,7 +868,7 @@ Only show lines for platforms where something was resolved. Skip empty lines. On
 - For how_to: prioritize YouTube (tutorials) and Reddit (guides)
 - Primary subquery weight = 1.0, secondary = 0.6-0.8, peripheral = 0.3-0.5
 
-**Available sources (include ALL in primary subquery):** reddit, x, youtube, tiktok, instagram, hackernews, polymarket. Optional: bluesky, truthsocial, threads, pinterest, grounding (web search - only if user has Brave/Exa/Serper key), digg (Digg clusters - only if `digg-pp-cli` is on PATH)
+**Available sources (include ALL in primary subquery):** reddit, x, youtube, tiktok, instagram, hackernews, polymarket. Optional: bluesky, truthsocial, threads, pinterest, douyin (抖音 / Chinese TikTok - only if `APIFY_API_TOKEN` is set and the user requested it via `--search=douyin` or INCLUDE_SOURCES; best for China-market / Chinese-language topics), grounding (web search - only if user has Brave/Exa/Serper key), digg (Digg clusters - only if `digg-pp-cli` is on PATH)
 
 **Intent → freshness_mode mapping:**
 - breaking_news, prediction → `strict_recent`

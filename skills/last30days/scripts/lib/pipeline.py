@@ -16,6 +16,7 @@ from . import (
     dates,
     dedupe,
     digg,
+    douyin,
     entity_extract,
     env,
     github,
@@ -61,6 +62,7 @@ SEARCH_ALIAS = {
     "web": "grounding",
     "xhs": "xiaohongshu",
     "xquik": "xquik",
+    "dy": "douyin",
 }
 
 MAX_SOURCE_FETCHES: dict[str, int] = {"x": 2}
@@ -83,6 +85,7 @@ MOCK_AVAILABLE_SOURCES = [
     "pinterest",
     "xquik",
     "digg",
+    "douyin",
 ]
 
 
@@ -126,6 +129,13 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
         available.append("perplexity")
     if requested_sources and "xiaohongshu" in requested_sources and env.is_xiaohongshu_available(config):
         available.append("xiaohongshu")
+    # Douyin: opt-in China-specific source (Apify actor). Enable via
+    # --search=douyin or INCLUDE_SOURCES=douyin so it never auto-runs just
+    # because an APIFY_API_TOKEN happens to be set for another purpose.
+    if env.is_douyin_available(config) and (
+        (requested_sources and "douyin" in requested_sources) or "douyin" in include_sources
+    ):
+        available.append("douyin")
     if env.is_threads_available(config):
         available.append("threads")
     if requested_sources and "pinterest" in requested_sources and env.is_pinterest_available(config):
@@ -967,6 +977,24 @@ def _retrieve_stream(
             sc_token = config.get("SCRAPECREATORS_API_KEY", "")
             tiktok.enrich_with_comments(items, token=sc_token)
         return items, {}
+    if source == "douyin":
+        # Use raw_topic so expand_douyin_queries() generates diverse variants
+        # from the original user topic, not the planner's narrowed search_query.
+        douyin_query = raw_topic or subquery.search_query
+        douyin_token = env.get_douyin_token(config)
+        result = douyin.search_and_enrich(
+            douyin_query,
+            from_date,
+            to_date,
+            depth=depth,
+            token=douyin_token,
+        )
+        items = douyin.parse_douyin_response(result)
+        # Enrich top videos with high-likes comments (the key signal for topic
+        # research). Default-on; suppress via EXCLUDE_SOURCES=douyin_comments.
+        if items and env.is_douyin_comments_available(config):
+            douyin.enrich_with_comments(items, token=douyin_token)
+        return items, {}
     if source == "instagram":
         # Use raw_topic so expand_instagram_queries() generates diverse variants
         # from the original user topic, not the planner's narrowed search_query.
@@ -1074,6 +1102,20 @@ def _mock_stream_results(source: str, subquery: schema.SubQuery) -> tuple[list[d
                 "engagement": {"likes": 200, "reposts": 35, "replies": 18, "quotes": 4},
                 "relevance": 0.79,
                 "why_relevant": "Mock X result",
+            }
+        ],
+        "douyin": [
+            {
+                "id": "DY1",
+                "text": f"抖音上大家都在讨论 {subquery.search_query}",
+                "url": "https://www.douyin.com/video/1",
+                "author_name": "example_creator",
+                "date": dates.get_date_range(4)[0],
+                "engagement": {"views": 50000, "likes": 3200, "comments": 410, "shares": 88},
+                "hashtags": [subquery.search_query],
+                "caption_snippet": f"抖音上大家都在讨论 {subquery.search_query}",
+                "relevance": 0.81,
+                "why_relevant": "Mock Douyin result",
             }
         ],
         "grounding": [

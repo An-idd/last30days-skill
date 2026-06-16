@@ -602,6 +602,36 @@ def get_tiktok_token(config: dict[str, Any]) -> str:
     return config.get('SCRAPECREATORS_API_KEY') or config.get('APIFY_API_TOKEN') or ''
 
 
+def is_douyin_available(config: dict[str, Any]) -> bool:
+    """Check if Douyin source is available.
+
+    Returns True when APIFY_API_TOKEN is set — Douyin runs through the
+    zen-studio/douyin-search-scraper Apify actor. Douyin is opt-in (a
+    China-specific source), so pipeline gates it behind --search/INCLUDE_SOURCES.
+    """
+    return bool(config.get('APIFY_API_TOKEN'))
+
+
+def get_douyin_token(config: dict[str, Any]) -> str:
+    """Get Douyin API token (the Apify API token)."""
+    return config.get('APIFY_API_TOKEN') or ''
+
+
+def is_douyin_comments_available(config: dict[str, Any]) -> bool:
+    """Check if Douyin comment enrichment should run.
+
+    Default-on whenever Douyin itself runs (an APIFY_API_TOKEN is set) — comments
+    are the highest-signal part of Douyin for topic research. Suppress via
+    EXCLUDE_SOURCES=douyin_comments. Unlike TikTok comments (opt-in via
+    INCLUDE_SOURCES), this is opt-out because Douyin is already an explicit
+    opt-in source.
+    """
+    if not config.get('APIFY_API_TOKEN'):
+        return False
+    exclude = {s.strip().lower() for s in (config.get('EXCLUDE_SOURCES') or '').split(',') if s.strip()}
+    return 'douyin_comments' not in exclude
+
+
 def _parse_include_sources(config: dict[str, Any]) -> set[str]:
     """Parse INCLUDE_SOURCES config value into a set of lowercase source names."""
     raw = config.get('INCLUDE_SOURCES') or ''
