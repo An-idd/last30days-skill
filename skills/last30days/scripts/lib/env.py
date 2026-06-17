@@ -690,7 +690,12 @@ def get_xiaohongshu_api_base(config: dict[str, Any]) -> str:
 
 
 def is_xiaohongshu_available(config: dict[str, Any]) -> bool:
-    """Check whether Xiaohongshu HTTP API is reachable and logged in."""
+    """Check whether the xiaohongshu-mcp service is reachable and logged in.
+
+    Probes /health (the MCP build returns {"status":"healthy"}; older REST
+    builds returned {"success":true} — accept either), then verifies an
+    authenticated session via the MCP check_login_status tool.
+    """
     # Import here to avoid heavy imports at module load.
     from . import http
 
@@ -700,17 +705,12 @@ def is_xiaohongshu_available(config: dict[str, Any]) -> bool:
         health = http.get(f"{base}/health", timeout=3, retries=2)
         if not isinstance(health, dict):
             return False
-        if not health.get("success"):
+        if not (health.get("success") or health.get("status") == "healthy"):
             return False
 
-        # Login probe can be slower on some deployments (browser/session checks),
-        # so use a slightly longer timeout to avoid false negatives.
-        login = http.get(f"{base}/api/v1/login/status", timeout=8, retries=2)
-        is_logged_in = (
-            login.get("data", {}).get("is_logged_in")
-            if isinstance(login, dict) else False
-        )
-        return bool(is_logged_in)
+        # Login probe goes over MCP (browser/session checks can be slower).
+        from . import xiaohongshu_api
+        return xiaohongshu_api.check_login(base, timeout=8)
     except (OSError, http.HTTPError):
         return False
     except Exception as exc:

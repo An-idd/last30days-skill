@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Xiaohongshu (小红书) source now speaks the MCP protocol** instead of the removed REST API. The current [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) ("纯查询精简版") exposes only `{base}/mcp` (MCP Streamable HTTP) and `/health`; the client now does the `initialize → notifications/initialized → tools/call` handshake and calls the `check_login_status` / `search_feeds` tools. `XIAOHONGSHU_API_BASE` still points at the service root (e.g. `http://localhost:18060`); availability requires the service to be reachable AND logged in. Output shape unchanged, so it still aggregates as a web source.
+
 ## [3.3.2] - 2026-06-06
 
 ### Fixed

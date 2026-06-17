@@ -1,14 +1,30 @@
-"""Xiaohongshu HTTP API search client for last30days.
+"""Xiaohongshu (小红书) search client for last30days.
 
-Uses xpzouying/xiaohongshu-mcp REST endpoints:
-- GET/POST /api/v1/feeds/search
-- GET /api/v1/login/status
+Talks to a locally-running xiaohongshu-mcp service over the Model Context
+Protocol (MCP) Streamable HTTP transport (xpzouying/xiaohongshu-mcp):
+
+- POST {base}/mcp  — JSON-RPC 2.0: initialize → notifications/initialized → tools/call
+- GET  {base}/health
+
+The current xiaohongshu-mcp ("纯查询精简版") exposes ONLY the MCP endpoint and a
+health check — the older REST API (/api/v1/feeds/search) has been removed — so
+this client speaks MCP directly. Tools used: check_login_status, search_feeds.
+
+Output items match the shared web-item ("grounding") shape so normalize.py can
+treat Xiaohongshu notes like any other web source.
 """
 
+import json
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from . import http
+
+# MCP protocol version we advertise on initialize; the server may negotiate a
+# different one back, which we then echo on subsequent requests.
+MCP_PROTOCOL_VERSION = "2025-06-18"
 
 
 def _to_int(value: Any) -> int:
@@ -64,6 +80,137 @@ def _build_note_url(feed_id: str, xsec_token: str) -> str:
     return f"https://www.xiaohongshu.com/explore/{feed_id}"
 
 
+# --------------------------------------------------------------------------- #
+# Minimal MCP Streamable-HTTP client (stdlib only)
+# --------------------------------------------------------------------------- #
+
+class _MCPError(Exception):
+    """An MCP-level error (JSON-RPC error, or tool isError)."""
+
+
+def _parse_mcp_body(body: str) -> Dict[str, Any]:
+    """Parse an MCP HTTP response body — plain JSON or SSE-framed.
+
+    The server runs with JSONResponse=true so responses are normally plain
+    application/json, but we also tolerate ``data: {...}`` SSE framing.
+    """
+    body = (body or "").strip()
+    if not body:
+        return {}
+    if body.startswith("data:") or "\ndata:" in body or body.startswith("event:"):
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                payload = line[len("data:"):].strip()
+                if payload and payload != "[DONE]":
+                    try:
+                        return json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+        return {}
+    return json.loads(body)
+
+
+def _raw_post(url: str, payload: Dict[str, Any], headers: Dict[str, str], timeout: int):
+    """POST JSON to ``url``; return (body_text, session_id_header)."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8")
+        session_id = resp.headers.get("Mcp-Session-Id")
+        return body, session_id
+
+
+class _MCPSession:
+    """One MCP connection: initialize once, then call any number of tools."""
+
+    def __init__(self, base: str, timeout: int = 20):
+        self.endpoint = base.rstrip("/") + "/mcp"
+        self.timeout = timeout
+        self.session_id: Optional[str] = None
+        self.protocol = MCP_PROTOCOL_VERSION
+        self._id = 0
+
+    def _next_id(self) -> int:
+        self._id += 1
+        return self._id
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "User-Agent": http.USER_AGENT,
+        }
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+            headers["MCP-Protocol-Version"] = self.protocol
+        return headers
+
+    def initialize(self) -> None:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": self.protocol,
+                "capabilities": {},
+                "clientInfo": {"name": "last30days", "version": "3"},
+            },
+        }
+        body, session_id = _raw_post(self.endpoint, payload, self._headers(), self.timeout)
+        if session_id:
+            self.session_id = session_id
+        result = _parse_mcp_body(body)
+        negotiated = (result.get("result") or {}).get("protocolVersion")
+        if negotiated:
+            self.protocol = negotiated
+        # Required handshake step; notification returns 202/empty — ignore errors.
+        try:
+            _raw_post(
+                self.endpoint,
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                self._headers(),
+                self.timeout,
+            )
+        except (urllib.error.URLError, OSError):
+            pass
+
+    def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+        body, _ = _raw_post(self.endpoint, payload, self._headers(), self.timeout)
+        resp = _parse_mcp_body(body)
+        if "error" in resp:
+            raise _MCPError(str(resp["error"]))
+        return resp.get("result") or {}
+
+
+def _tool_text(result: Dict[str, Any]) -> str:
+    """Extract the first text content block from a tools/call result."""
+    for block in result.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            return str(block.get("text") or "")
+    return ""
+
+
+def check_login(base_url: str, timeout: int = 8) -> bool:
+    """Return True if the xiaohongshu-mcp service is reachable AND logged in."""
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return False
+    try:
+        session = _MCPSession(base, timeout=timeout)
+        session.initialize()
+        text = _tool_text(session.call_tool("check_login_status", {}))
+    except (urllib.error.URLError, OSError, _MCPError, json.JSONDecodeError):
+        return False
+    return ("已登录" in text or "✅" in text) and "未登录" not in text
+
+
 def search_feeds(
     topic: str,
     from_date: str,
@@ -71,35 +218,44 @@ def search_feeds(
     base_url: str,
     depth: str = "default",
 ) -> List[Dict[str, Any]]:
-    """Search Xiaohongshu feeds and normalize to web-item shape."""
+    """Search Xiaohongshu via MCP and normalize to web-item shape."""
     base = (base_url or "").rstrip("/")
     if not base:
         raise ValueError("Missing Xiaohongshu API base URL")
 
-    # Quick login sanity check.
-    login = http.get(f"{base}/api/v1/login/status", timeout=8, retries=1)
-    is_logged_in = (
-        login.get("data", {}).get("is_logged_in")
-        if isinstance(login, dict) else False
-    )
-    if not is_logged_in:
-        raise http.HTTPError("Xiaohongshu API reachable but not logged in")
+    session = _MCPSession(base, timeout=30)
+    session.initialize()
 
-    # API supports filters; use recency-oriented defaults.
+    # Login sanity check (MCP search requires an authenticated browser session).
+    login_text = _tool_text(session.call_tool("check_login_status", {}))
+    if "未登录" in login_text or ("已登录" not in login_text and "✅" not in login_text):
+        raise http.HTTPError("Xiaohongshu MCP reachable but not logged in")
+
+    # Tool supports filters; use recency-oriented defaults by depth.
     publish_time = "一天内" if depth == "quick" else "一周内" if depth == "default" else "半年内"
-    payload = {
-        "keyword": topic,
-        "filters": {
-            "sort_by": "综合",
-            "note_type": "不限",
-            "publish_time": publish_time,
-            "search_scope": "不限",
-            "location": "不限",
+    result = session.call_tool(
+        "search_feeds",
+        {
+            "keyword": topic,
+            "filters": {
+                "sort_by": "综合",
+                "note_type": "不限",
+                "publish_time": publish_time,
+                "search_scope": "不限",
+                "location": "不限",
+            },
         },
-    }
+    )
+    if result.get("isError"):
+        raise http.HTTPError("Xiaohongshu search failed: " + _tool_text(result)[:200])
 
-    resp = http.post(f"{base}/api/v1/feeds/search", payload, timeout=20, retries=1)
-    feeds = resp.get("data", {}).get("feeds", []) if isinstance(resp, dict) else []
+    # search_feeds returns its payload as a JSON string in a text content block.
+    text = _tool_text(result)
+    try:
+        payload = json.loads(text) if text else {}
+    except json.JSONDecodeError:
+        payload = {}
+    feeds = payload.get("feeds") if isinstance(payload, dict) else []
     if not isinstance(feeds, list):
         feeds = []
 
@@ -122,11 +278,7 @@ def search_feeds(
             continue
 
         xsec_token = str(feed.get("xsecToken") or note.get("xsecToken") or "").strip()
-        title = str(
-            note.get("displayTitle")
-            or note.get("title")
-            or ""
-        ).strip()
+        title = str(note.get("displayTitle") or note.get("title") or "").strip()
         snippet = str(
             note.get("desc")
             or note.get("displayDesc")
@@ -138,6 +290,8 @@ def search_feeds(
         comments = _to_int(interact.get("commentCount"))
         favorites = _to_int(interact.get("collectedCount"))
 
+        # MCP search results carry no publish timestamp; date stays unknown
+        # (normalize keeps dateless Xiaohongshu items — require_date is grounding-only).
         date_value = _timestamp_to_date_ms(note.get("time"))
         why = f"Xiaohongshu engagement: likes={likes}, comments={comments}, favorites={favorites}"
 

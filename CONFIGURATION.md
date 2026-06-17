@@ -64,7 +64,7 @@ The project-scoped file is the cleanest pattern for **per-client setups**: drop 
 | TruthSocial | `TRUTHSOCIAL_TOKEN` | TruthSocial items | yes |
 | Bilibili (B站) | none (keyless, on by default) | Bilibili videos via public WBI search; disable with `LAST30DAYS_DISABLE_BILIBILI=1` | free |
 | Douyin (抖音) | `APIFY_API_TOKEN` + opt-in via `--search=douyin` or `INCLUDE_SOURCES=douyin` | Douyin short videos + top comments (zen-studio Apify actor) | pay-as-you-go (Apify actor + ~$5.99/1k comments) |
-| Xiaohongshu (小红书) | `XIAOHONGSHU_API_BASE` pointing at a running [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) service (auto-enabled when set; or `--search=xhs`) | Xiaohongshu notes | self-hosted, free (you run the service + log in) |
+| Xiaohongshu (小红书) | `XIAOHONGSHU_API_BASE` pointing at a running [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) service — spoken over the **MCP** protocol at `{base}/mcp` (auto-enabled when reachable + logged in; or `--search=xhs`). Local run: `http://localhost:18060` | Xiaohongshu notes | self-hosted, free (you run the service + scan-QR login) |
 | Web search | one of: `BRAVE_API_KEY`, `EXA_API_KEY`, `SERPER_API_KEY`, `PARALLEL_API_KEY` | `--auto-resolve` and Step 2 supplements | Brave has a free tier; native WebSearch on Claude Code / Codex / Gemini works as a fallback |
 | Perplexity Deep Research | `OPENROUTER_API_KEY` | `--deep-research` flag (~$0.90/query) | no |
 | Apify (alternate scraper) | `APIFY_API_TOKEN` | fallback for Reddit/TikTok/Instagram when ScrapeCreators is exhausted | yes (limited) |
